@@ -9,6 +9,9 @@ Run this once per invocation (cron / GitHub Actions call it repeatedly).
 
 import json
 import os
+import sys
+from datetime import datetime, timedelta, timezone
+
 import requests
 from bs4 import BeautifulSoup
 
@@ -143,11 +146,41 @@ def check_all() -> None:
 
         if available and not was_available:
             send_telegram(f"\U0001F7E2 IN STOCK: {name}\n{url}")
+            state["_last_alert_at"] = datetime.now(timezone.utc).isoformat()
 
         state[name] = available
 
     save_state(state)
 
 
+def daily_summary() -> None:
+    """Send a once-a-day reassurance ping if nothing has been found lately."""
+    state = load_state()
+    last_alert_raw = state.get("_last_alert_at")
+
+    recently_alerted = False
+    if last_alert_raw:
+        try:
+            last_alert_at = datetime.fromisoformat(last_alert_raw)
+            recently_alerted = (datetime.now(timezone.utc) - last_alert_at) < timedelta(hours=24)
+        except ValueError:
+            pass
+
+    if recently_alerted:
+        print("[daily] Skipping daily summary -- an alert already went out within the last 24h.")
+        return
+
+    site_names = "\n".join(f"- {c['name']}" for c in CHECKS)
+    send_telegram(
+        "\U0001F4CB Daily check-in: no product found in stock in the past 24 hours.\n"
+        f"Still watching:\n{site_names}"
+    )
+    print("[daily] Sent daily summary.")
+
+
 if __name__ == "__main__":
-    check_all()
+    mode = sys.argv[1] if len(sys.argv) > 1 else "check"
+    if mode == "daily":
+        daily_summary()
+    else:
+        check_all()

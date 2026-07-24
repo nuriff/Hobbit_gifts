@@ -5,7 +5,18 @@ on:
     # Every 5 minutes. GitHub may throttle this to ~15 min during busy periods,
     # which is normally fine for a stock check.
     - cron: '*/5 * * * *'
-  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab too
+    # Once a day at 16:00 UTC = 18:00 CEST (Prague, summer/DST time).
+    # NOTE: GitHub Actions cron is always UTC and does NOT adjust for daylight
+    # saving. If this is still running after Europe switches back to CET
+    # (winter time, late October), change this to '0 17 * * *' to keep it at
+    # 6pm local time.
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Mode to run manually: check or daily'
+        required: false
+        default: 'check'
 
 jobs:
   check:
@@ -20,11 +31,20 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4
 
+      - name: Determine mode
+        id: mode
+        run: |
+          if [ "${{ github.event.schedule }}" == "0 16 * * *" ] || [ "${{ github.event.inputs.mode }}" == "daily" ]; then
+            echo "mode=daily" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=check" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run monitor
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python monitor.py
+        run: python monitor.py ${{ steps.mode.outputs.mode }}
 
       - name: Save state back to repo
         run: |
