@@ -1,0 +1,35 @@
+name: Check product stock
+
+on:
+  schedule:
+    # Every 5 minutes. GitHub may throttle this to ~15 min during busy periods,
+    # which is normally fine for a stock check.
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab too
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Run monitor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python monitor.py
+
+      - name: Save state back to repo
+        run: |
+          git config user.name "stock-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state.json
+          git diff --staged --quiet || git commit -m "update state"
+          git push
