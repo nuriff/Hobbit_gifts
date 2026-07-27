@@ -67,6 +67,33 @@ def najada_hobbit_gift_available(soup):
     return False
 
 
+def cernyrytir_available():
+    # This site is a JavaScript-rendered app -- there's no usable HTML to
+    # scrape directly. Instead it calls a JSON API to list tagged products.
+    # Verified against the site's own minified frontend code: the buy button
+    # is enabled exactly when prodStatusName == "ACTIVE" and availEshopQty > 0
+    # (the "presale" flag is just a shipping-date label, it does NOT block
+    # ordering in the site's own logic).
+    url = "https://eshop-api.cernyrytir.eu/api/public/tagged-product/list?eshop_lang=CZ"
+    payload = {
+        "extendedFilter": {"tagIds": [0], "inStockOnlyEshop": False, "inStockOnlyStore": False},
+        "pagination": {"page": 1, "rowsPerPage": 48, "rowsNumber": 0, "sortBy": "sortPriceSell", "descending": True},
+    }
+    api_headers = {**HEADERS, "Content-Type": "application/json", "Origin": "https://cernyrytir.cz",
+                   "Referer": "https://cernyrytir.cz/"}
+    resp = requests.post(url, headers=api_headers, json=payload, timeout=20)
+    resp.raise_for_status()
+    data = resp.json()
+
+    for item in data.get("list", []):
+        name = item.get("sortName", "")
+        lname = name.lower()
+        if "hobbit" in lname and "gift" in lname:
+            merch = item.get("merch", {}) or {}
+            return merch.get("prodStatusName") == "ACTIVE" and (merch.get("availEshopQty") or 0) > 0
+    return False
+
+
 # One entry per page being checked.
 # `available_if` is the rule that decides "can I buy this right now?".
 # Each was verified against the site's real HTML -- see comments per entry.
@@ -102,6 +129,11 @@ CHECKS = [
         "url": "https://www.najada.games/mtg",
         "available_if": najada_hobbit_gift_available,
     },
+    {
+        "name": "Cerny Rytir - The Hobbit Bundle",
+        "url": "https://cernyrytir.cz/tagged/0?iso_e=false&iso_s=false&sort_by=&rpp=48",
+        "custom_check": cernyrytir_available,
+    },
 ]
 
 
@@ -133,10 +165,15 @@ def check_all() -> None:
     for check in CHECKS:
         name, url = check["name"], check["url"]
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=20)
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "html.parser")
-            available = bool(check["available_if"](soup))
+            if "custom_check" in check:
+                # Some sites (e.g. JS-rendered apps) need their own request
+                # logic entirely, rather than a plain GET + HTML scrape.
+                available = bool(check["custom_check"]())
+            else:
+                resp = requests.get(url, headers=HEADERS, timeout=20)
+                resp.raise_for_status()
+                soup = BeautifulSoup(resp.text, "html.parser")
+                available = bool(check["available_if"](soup))
         except Exception as e:
             print(f"[error] {name}: {e}")
             continue
